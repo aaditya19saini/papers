@@ -4163,6 +4163,47 @@ position_caret_cursor_for_event (PpsView *view,
 	return TRUE;
 }
 
+/* The highlighter tool highlights text instead of drawing freehand */
+static gboolean
+is_text_highlighter_active (PpsView *view)
+{
+	PpsViewPrivate *priv = GET_PRIVATE (view);
+
+	return (pps_document_model_get_annotation_editing_state (priv->model) & PPS_ANNOTATION_EDITING_STATE_INK) &&
+	       pps_annotation_model_get_tool (pps_document_model_get_annotation_model (priv->model)) == TOOL_HIGHLIGHT;
+}
+
+static void
+highlight_selection (PpsView *view)
+{
+	PpsViewPrivate *priv = GET_PRIVATE (view);
+	PpsAnnotationTextMarkupType markup_type = PPS_ANNOTATION_TEXT_MARKUP_HIGHLIGHT;
+	const GdkRGBA *color = pps_annotation_model_get_highlight_color (pps_document_model_get_annotation_model (priv->model));
+
+	if (!priv->annots_context)
+		return;
+
+	/* Adding an annotation resets the selection, so copy it out first */
+	g_autoptr (GArray) ranges = g_array_new (FALSE, FALSE, sizeof (PpsViewSelection));
+	for (GList *l = priv->selection_info.selections; l; l = l->next) {
+		PpsViewSelection sel = *(PpsViewSelection *) l->data;
+		sel.covered_region = NULL;
+		g_array_append_val (ranges, sel);
+	}
+
+	clear_selection (view);
+
+	for (guint i = 0; i < ranges->len; i++) {
+		PpsViewSelection *sel = &g_array_index (ranges, PpsViewSelection, i);
+		PpsPoint start = { sel->rect.x1, sel->rect.y1 };
+		PpsPoint end = { sel->rect.x2, sel->rect.y2 };
+
+		pps_annotations_context_add_annotation_sync (priv->annots_context, sel->page,
+		                                             PPS_ANNOTATION_TYPE_TEXT_MARKUP,
+		                                             &start, &end, color, &markup_type);
+	}
+}
+
 static void
 pps_view_button_press_event (GtkGestureClick *self,
                              int n_press,
@@ -4185,7 +4226,9 @@ pps_view_button_press_event (GtkGestureClick *self,
 	if (!document || pps_document_get_n_pages (document) <= 0)
 		return;
 
-	if (pps_document_model_get_annotation_editing_state (priv->model) & (PPS_ANNOTATION_EDITING_STATE_INK | PPS_ANNOTATION_EDITING_STATE_INSERT_TEXT)) {
+	if ((pps_document_model_get_annotation_editing_state (priv->model) & PPS_ANNOTATION_EDITING_STATE_INSERT_TEXT) ||
+	    (pps_document_model_get_annotation_editing_state (priv->model) & PPS_ANNOTATION_EDITING_STATE_INK &&
+	     !is_text_highlighter_active (view))) {
 		gtk_gesture_set_state (GTK_GESTURE (self), GTK_EVENT_SEQUENCE_DENIED);
 		return;
 	}
@@ -4534,13 +4577,24 @@ selection_end_cb (GtkGestureDrag *selection_gesture,
 {
 	PpsViewPrivate *priv = GET_PRIVATE (view);
 
+	gboolean update_pending = priv->selection_update_id != 0;
+
+	g_clear_handle_id (&priv->selection_scroll_id, g_source_remove);
+	g_clear_handle_id (&priv->selection_update_id, g_source_remove);
+
+	if (is_text_highlighter_active (view)) {
+		/* Catch up with the last mouse position before highlighting */
+		if (update_pending)
+			selection_update_idle_cb (view);
+		if (priv->selection_info.selections)
+			highlight_selection (view);
+		return;
+	}
+
 	if (priv->selection_info.selections) {
 		g_clear_object (&priv->link_selected);
 		pps_view_update_primary_selection (view);
 	}
-
-	g_clear_handle_id (&priv->selection_scroll_id, g_source_remove);
-	g_clear_handle_id (&priv->selection_update_id, g_source_remove);
 }
 
 static void

@@ -600,6 +600,9 @@ tool_properties_updated (GObject *gobject, GParamSpec *pspec, gpointer user_data
 {
 	PpsAnnotationLayerInk *draw = PPS_ANNOTATION_LAYER_INK (user_data);
 	update_cursor (draw);
+	/* Text highlighter: let clicks fall through to the view's text selection */
+	gtk_widget_set_can_target (GTK_WIDGET (draw),
+	                           pps_annotation_model_get_tool (GET_ANNOT_MODEL (draw)) != TOOL_HIGHLIGHT);
 }
 
 static void
@@ -824,7 +827,7 @@ pps_annotation_layer_ink_constructor (GType type,
 	g_signal_connect (annotation_model, "notify::tool", G_CALLBACK (tool_properties_updated), draw);
 	g_signal_connect (GET_DOC_MODEL (draw), "notify::scale", G_CALLBACK (scale_updated), draw);
 
-	update_cursor (draw);
+	tool_properties_updated (NULL, NULL, draw);
 
 	return object;
 }
