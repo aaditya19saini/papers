@@ -4183,8 +4183,18 @@ highlight_selection (PpsView *view)
 	if (!priv->annots_context)
 		return;
 
+	/* Adding an annotation resets the selection, so copy it out first */
+	g_autoptr (GArray) ranges = g_array_new (FALSE, FALSE, sizeof (PpsViewSelection));
 	for (GList *l = priv->selection_info.selections; l; l = l->next) {
-		PpsViewSelection *sel = l->data;
+		PpsViewSelection sel = *(PpsViewSelection *) l->data;
+		sel.covered_region = NULL;
+		g_array_append_val (ranges, sel);
+	}
+
+	clear_selection (view);
+
+	for (guint i = 0; i < ranges->len; i++) {
+		PpsViewSelection *sel = &g_array_index (ranges, PpsViewSelection, i);
 		PpsPoint start = { sel->rect.x1, sel->rect.y1 };
 		PpsPoint end = { sel->rect.x2, sel->rect.y2 };
 
@@ -4192,8 +4202,6 @@ highlight_selection (PpsView *view)
 		                                             PPS_ANNOTATION_TYPE_TEXT_MARKUP,
 		                                             &start, &end, color, &markup_type);
 	}
-
-	clear_selection (view);
 }
 
 static void
